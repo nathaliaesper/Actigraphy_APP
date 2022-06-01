@@ -1,0 +1,2 @@
+"filename","file.corrupt","file.too.short","use.temperature","scale.x","scale.y","scale.z","offset.x","offset.y","offset.z","temperature.offset.x","temperature.offset.y","temperature.offset.z","cal.error.start","cal.error.end","n.10sec.windows","n.hours.considered","QCmessage","mean.temp","device.serial.number","NFilePagesSkipped"
+"meta_NDARVC310XV2.gt3x.RData",FALSE,FALSE,TRUE,0.994439901215856,0.989397845626187,0.998403372955444,-0.010463175054847,-0.00317456710644474,0.054462618563628,0,0,0,0,0,0,0,"Autocalibration not done","","not extracted",0
