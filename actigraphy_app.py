@@ -26,6 +26,7 @@ from os.path import exists, isfile, join
 from datetime import date, datetime
 from plotly.subplots import make_subplots
 import argparse
+from numpy import genfromtxt
 
 #print(daq.__version__)
 
@@ -43,8 +44,14 @@ parser.add_argument('input_folder', help='GGIR output folder')
 args=parser.parse_args()
 
 #global input_datapath
+'''
 input_datapath = sys.argv[1]
 files = [f for f in listdir(input_datapath+'/meta/ms4.out') if f.endswith(".RData")]
+files = sorted(files)
+'''
+
+input_datapath = sys.argv[1]
+files = [f for f in listdir(input_datapath) if f.startswith("output_")]
 files = sorted(files)
 
 if (exists(os.path.join(input_datapath+'/logs'))):
@@ -68,8 +75,8 @@ pd.Series.which = which
 
 # Function to load the ms4.out file and get some useful variables
 def load_ms4_file(filename):
-    
-    filepath = os.path.abspath(os.path.join(input_datapath + '/meta/ms4.out', filename))
+
+    filepath = os.path.abspath(os.path.join(input_datapath + 'output_' + filename + '/meta/ms4.out', filename + '.gt3x.RData'))
 
     night_summary = rdata.parser.parse_file(filepath)
     night_summary_converted = rdata.conversion.convert(night_summary)
@@ -89,8 +96,9 @@ def load_ms4_file(filename):
 
 # Function to load the metadata file and get some useful variables
 def load_metadata(filename):
+    identifier = filename
     filename = 'meta_' + filename
-    filepath = os.path.abspath(os.path.join(input_datapath + '/meta/basic', filename))
+    filepath = os.path.abspath(os.path.join(input_datapath + 'output_' + identifier + '/meta/basic', filename + '.gt3x.RData'))
 
     basic = rdata.parser.parse_file(filepath)
     basic_converted = rdata.conversion.convert(basic)
@@ -111,11 +119,12 @@ def load_metadata(filename):
 # Function to create the act graphs
 def create_graphs(filename):
 
-    identifier = filename[0:12]
+    identifier = filename[7:]
 
     # First, load files (ms4.out and metadata)
-    num_nights, sleeponset, sleepduration, n_summary_data, week_day, sleep_dates, sleeponset_time_all, wake_time_all = load_ms4_file(filename)
-    ACC, nonwearscore, nw_time, anglez, date_time, ws3, ws2, axis_range = load_metadata(filename)
+    num_nights, sleeponset, sleepduration, n_summary_data, week_day, sleep_dates, sleeponset_time_all, wake_time_all = load_ms4_file(identifier)
+    ACC, nonwearscore, nw_time, anglez, date_time, ws3, ws2, axis_range = load_metadata(identifier)
+    #timestamp = load_csv_file(filename)
 
     # Index 0=year; 1=month; 2=day; 3=hour; 4=min; 5=sec; 6=timezone
     time_split = date_time.str.split(r"T|-|:", expand=True)
@@ -322,12 +331,9 @@ def create_graphs(filename):
 
             # add extensions if <24hr of data
             # hold adjustments amounts on first and last day plots  
-            first_day_adjust = 0
-            last_day_adjust = 0
 
             if ((((t1 - t0)+1) != npointsperday) & (t0 == 1)):
                 extension = [0]*((npointsperday-(t1-t0))-1)
-                first_day_adjust = len(extension)
                 acc = extension + list(acc)
                 ang = extension + list(ang)
                 non_wear = extension + list(non_wear)
@@ -352,7 +358,6 @@ def create_graphs(filename):
 
             elif (((t1-t0)+1) != npointsperday & (t1 == len(time))):
                 extension = [0]*((npointsperday-(t1-t0)))
-                last_day_adjust = len(acc)
                 acc = list(acc) + extension
                 ang = list(ang) + extension
                 non_wear = list(non_wear) + extension
@@ -395,6 +400,8 @@ def create_graphs(filename):
         #sleep = [sleeplog_file[idx] for idx in range(len(sleeplog_file)) if idx%2!=1]
 
         excl_night = [0 for i in range(daycount)]
+        nap_times = [0 for i in range(daycount)]
+        review_night = [0 for i in range(daycount)]
 
 
     ddate_temp = ddate_new[0]
@@ -409,7 +416,7 @@ def create_graphs(filename):
         new_sleep_date = new_sleep_date.reset_index()
         new_sleep_date = new_sleep_date[0]
 
-    return identifier, axis_range, daycount, week_day, new_sleep_date, vec_acc, vec_ang, vec_sleeponset, vec_wake, vec_sleep_hour, vec_sleep_min, vec_wake_hour, vec_wake_min, vec_line, npointsperday, excl_night, vec_nonwear, ddate_new
+    return identifier, axis_range, daycount, week_day, new_sleep_date, vec_acc, vec_ang, vec_sleeponset, vec_wake, vec_sleep_hour, vec_sleep_min, vec_wake_hour, vec_wake_min, vec_line, npointsperday, excl_night, vec_nonwear, ddate_new, nap_times, date_time, review_night
 
 # File example:
 # ID onset_N1 wake_N1 onset_N2 wake_N2 onset_N3 wake_N3 ...
@@ -465,7 +472,6 @@ def save_GGIR_file(hour_vector, fig_variables, filename):
     writer.writerow(data_line)
     f.close()
 
-    print("GGIR file saved!")
 
 def save_log_file(name, identifier):
 
@@ -501,8 +507,6 @@ def save_log_file(name, identifier):
         writer.writerow(header)
         writer.writerow(log_info)
         f.close()
-
-    print("Log file saved!")
 
     return filename
 
@@ -542,44 +546,55 @@ def save_sleeplog_file(identifier, day, sleep, wake):
     df.to_csv(filename_path, index=False)
 
 
-def save_multiple_sleep_log(name, identifier, multiple_log):
+'''
+def save_multiple_sleeplog(identifier, multiple_log):
 
     todays_date_time = datetime.now()
 
-    if (multiple_log == None or multiple_log == []):
-        multiple_log = ''
+    #if (multiple_log == None or multiple_log == []):
+    #    multiple_log = ''
 
-    filename = 'multiple_sleep_log.csv'
-
+    filename = 'multiple_sleeplog_' + identifier + '.csv'
+    nap_times = 0
     header = []
     log_info = []
-    log_info.append(name)
-    log_info.append(identifier)
-    log_info.append(multiple_log)
-    log_info.append(todays_date_time)
+
+    # Adjusting nap times variable to insert all days in the same column
+    for i in range(1, np.size(multiple_log)+1):
+        if multiple_log[i-1] == 1:
+            if nap_times == 0:
+                nap_times = i
+            else:
+                nap_times = str(nap_times) + ' ' + str(i)
     
-    # If file exists, append the new information on the existing file
-    if (exists(os.path.join(log_path, 'multiple_sleep_log.csv'))):
-        f = open(os.path.join(log_path, 'multiple_sleep_log.csv'), 'a')
+    # If file exists, remove older file, create a new one, and store the data
+    if (exists(os.path.join(log_path, filename))):
+        os.remove(os.path.join(log_path, filename))
+
+        f = open(os.path.join(log_path, filename), 'w')
         writer = csv.writer(f)
-        writer.writerow(log_info)
-        f.close()
-    # If file does not exists, create the file and append the information to the new file
-    else:
-        f = open(os.path.join(log_path, 'multiple_sleep_log.csv'), 'w')
-        writer = csv.writer(f)
-        header.append("Username")
-        header.append("Participant")
-        header.append("Multiple sleep segments")
-        header.append("Last modified")
+        header.append("ID")
+        header.append("Days with multiple sleep times")
+        log_info.append(identifier)
+        log_info.append(nap_times)
         writer.writerow(header)
         writer.writerow(log_info)
         f.close()
 
-    print("Multiple sleep log saved!")
+    # If file does not exists, create the file and append the information to the new file
+    else:
+        f = open(os.path.join(log_path, filename), 'w')
+        writer = csv.writer(f)
+        header.append("ID")
+        header.append("Days with multiple sleep times")
+        log_info.append(identifier)
+        log_info.append(nap_times)
+        writer.writerow(header)
+        writer.writerow(log_info)
+        f.close()
 
     return filename
-
+'''
 
 def save_log_analysis_completed(identifier, completed):
 
@@ -610,8 +625,6 @@ def save_log_analysis_completed(identifier, completed):
         writer.writerow(log_info)
         f.close()
 
-    print("Sleep log analysis completed!")
-
 
 # File format:
 # ID, day_part5, relyonguider_part4, night_part4
@@ -633,7 +646,7 @@ def save_excluded_night(identifier, excl_night):
     # Saving the csv file
     # If file exists, remove older file, create a new one, and store the data
     if (exists(os.path.join(log_path, filename))):
-        os.remove(os.path.join(log_path, filename))
+        #os.remove(os.path.join(log_path, filename))
 
         f = open(os.path.join(log_path, filename), 'w')
         writer = csv.writer(f)
@@ -667,6 +680,118 @@ def save_excluded_night(identifier, excl_night):
     print("Excluded nights formated: ", nights_excluded)
 
 
+def create_datacleaning(identifier):
+    daycount = fig_variables[2]
+    filename = 'missing_sleep_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+
+    data = ['0' for ii in range(0, daycount-1)]
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(data)
+    f.close()
+
+
+def save_datacleaning(identifier, datacleaning_log):
+    filename = 'missing_sleep_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    data = datacleaning_log
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(data)
+    f.close()
+
+
+def open_datacleaning(identifier):
+    filename = 'missing_sleep_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    df = pd.read_csv(filename_path, header=None)
+    datacleaning = [df.iloc[0,idx] for idx in range(0,daycount-1)]
+
+    return datacleaning
+
+def create_multiple_sleeplog(identifier):
+    daycount = fig_variables[2]
+    filename = 'multiple_sleeplog_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+
+    data = ['0' for ii in range(0, daycount-1)]
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(data)
+    f.close()
+
+
+def save_multiple_sleeplog(identifier, multiple_log):
+    filename = 'multiple_sleeplog_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    data = multiple_log
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(data)
+    f.close()
+
+
+def open_multiple_sleeplog(identifier):
+
+    filename = 'multiple_sleeplog_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    df = pd.read_csv(filename_path, header=None)
+    multiple_sleep = [df.iloc[0,idx] for idx in range(0,daycount-1)]
+
+    return multiple_sleep
+
+
+def create_review_night_file(identifier):
+    daycount = fig_variables[2]
+    filename = 'review_night_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+
+    dataline = ['0' for ii in range(1, daycount)]
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(dataline)
+    f.close()
+
+
+def save_review_night(identifier, review_night):
+
+    filename = 'review_night_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    data = review_night
+
+    f = open(filename_path, 'w')
+    writer = csv.writer(f)
+    writer.writerow(data)
+    f.close()
+
+
+def open_review_night(identifier):
+    filename = 'review_night_' + identifier + '.csv'
+    filename_path = os.path.join(log_path, filename)
+    daycount = fig_variables[2]
+
+    df = pd.read_csv(filename_path, header=None)
+    vec_nights = [df.iloc[0,idx] for idx in range(0,daycount-1)]
+
+    return vec_nights
+
+
 def store_sleep_diary(day, sleep, wake):
 
     vec_line = fig_variables[13]
@@ -689,10 +814,35 @@ def store_excluded_night(day):
 
     return excl_night
 
+def point2time_timestamp(point):
+    axis_range = fig_variables[1]
+    npointsperday = fig_variables[14]
+
+    if point > 6*axis_range:
+        temp_point = ((point*24)/npointsperday)-12
+    else:
+        temp_point = (point*24)/npointsperday+12
+    temp_point_hour = int(temp_point)
+
+    temp_point_min = (temp_point - int(temp_point)) * 60
+    if (int(temp_point_min) == 60):
+        temp_point_min = 00
+
+    if int(temp_point_min) < 10:
+        temp_point_min = '0' + str(int(temp_point_min))
+        point_new = str(temp_point_hour) + ':' + temp_point_min
+    else:
+        point_new = str(temp_point_hour) + ':' + str(int(temp_point_min))
+
+    return point_new
+
+
 def point2time(sleep, wake):
 
     axis_range = fig_variables[1]
     npointsperday = fig_variables[14]
+    all_dates = fig_variables[17]
+    #print(axis_range)
 
     # Get sleeponset
     if int(sleep) == 0:
@@ -726,14 +876,15 @@ def point2time(sleep, wake):
             temp_wake_min = 0
 
         wake_point2time = str(temp_wake_hour) + ':' + str(int(temp_wake_min)) + ':00'
-    #print("type wake_point2time: ", type(wake_point2time))
+
     return sleep_point2time, wake_point2time
 
 
-def time2point(sleep, wake):
+def time2point(sleep, wake, day):
 
     axis_range = fig_variables[1]
     npointsperday = fig_variables[14] 
+    all_dates = fig_variables[17]
 
     if sleep == 0:
         sleep2return = 0
@@ -763,17 +914,16 @@ def time2point(sleep, wake):
         wake_time_hour = int(wake_split[0])
         wake_time_min = int(wake_split[1])
         # hour
-        if wake_time_hour >= 0 and wake_time_hour < 12:
-            wake_time_hour = ((wake_time_hour+12)*8640)/12
+        if wake_time_hour >= 0 and wake_time_hour < 24:
+            wake_time_hour = ((wake_time_hour+12)*17280)/24
         else:
-            wake_time_hour = ((wake_time_hour-12)*8640)/12
+            wake_time_hour = ((wake_time_hour-12)*17280)/24
         # minute
         if wake_time_min == 0:
             wake_time_min = 0
         else:
             wake_time_min = ((wake_time_min*12))
         wake2return = wake_time_hour + wake_time_min
-
 
     return sleep2return, wake2return
 
@@ -825,13 +975,13 @@ app.layout = html.Div(style={'backgroundColor': colors['background']}, children=
 def parse_contents(filename, name):
     
     global fig_variables
-    
 
     try:
         if (name == None or name == ''):
             return '','',True,False
         else:
-            if 'RData' in filename:
+            #if 'RData' in filename:
+            if 'output_' in filename:
                 print("Loading data ...")
                 fig_variables = create_graphs(filename)
                 identifier = fig_variables[0]
@@ -842,6 +992,8 @@ def parse_contents(filename, name):
                 hour_vector = []
                 sleep_tmp = []
                 wake_tmp = []
+                tmp_axis = int(axis_range/2)
+                all_dates = fig_variables[17]
 
                 for ii in range(0, len(sleep)):
                     sleep_tmp1, wake_tmp1 = point2time(sleep[ii], wake[ii])
@@ -852,12 +1004,38 @@ def parse_contents(filename, name):
                     hour_vector.append(sleep_tmp[jj])
                     hour_vector.append(wake_tmp[jj])
 
-                save_GGIR_file(hour_vector, fig_variables, filename)
-                
+                # Checking for a previous sleeplog file
+                if (exists(os.path.join(input_datapath+'logs/sleeplog_'+identifier+'.csv'))):
+                    print("Participant ", identifier, "have a sleeplog. Loading existing file")
+                else:
+                    print("Participant ", identifier, "does not have a sleeplog. Loading sleepdata from GGIR")
+                    save_GGIR_file(hour_vector, fig_variables, filename)
+
+                # Checking for a previous nights do review file
+                if (exists(os.path.join(input_datapath+'logs/review_night_'+identifier+'.csv'))):
+                    print("Participant ", identifier, "have a night review file. Loading existing file")
+                else:
+                    print("Participant ", identifier, "does not have a night review file. Creating a new one.")
+                    create_review_night_file(identifier)
+
+                # Checking for a multiple sleeplog (nap times) file
+                if (exists(os.path.join(input_datapath+'logs/multiple_sleeplog_'+identifier+'.csv'))):
+                    print("Participant ", identifier, "have a multiple sleeplog file. Loading existing file")
+                else:
+                    print("Participant ", identifier, "does not have a multiple sleeplog file. Creating a new one.")
+                    create_multiple_sleeplog(identifier)
+
+                # Checking for data cleaning file
+                if (exists(os.path.join(input_datapath+'logs/missing_sleep_'+identifier+'.csv'))):
+                    print("Participant ", identifier, "have a data cleaning file. Loading existing file")
+                else:
+                    print("Participant ", identifier, "does not have a data cleaning file. Creating a new one.")
+                    create_datacleaning(identifier)
+
                 save_log_file(name, fig_variables[0])
 
                 return [html.Div([
-                    html.B("* All the changes will be automatically saved\n\n", style={"color":"red"}),
+                    html.B("* All changes will be automatically saved\n\n", style={"color":"red"}),
                     html.B("Select day for participant " + fig_variables[0] +": "),
                     dcc.Slider(1, fig_variables[2]-1, 1, 
                         value=1,
@@ -867,36 +1045,64 @@ def parse_contents(filename, name):
                     dcc.Checklist([' I\'m done and I would like to proceed to the next participant. '], id='are-you-done', style={'margin-left': '50px'}),
                     html.Pre(id="check-done"),
 
-                    dcc.Checklist([' Does this participant have nap times in any of the days?'], id='multiple_sleep', style={"margin-left": "50px"}),
+                    daq.BooleanSwitch(id="multiple_sleep", on=False, label = ' Does this participant have multiple sleep periods in this 24h period?'),
                     html.Pre(id="checklist-items"),
 
                     daq.BooleanSwitch(id='exclude-night', on=False, label=' Does this participant have more than 2 hours of missing sleep data from 8PM to 8AM?'),
-                                   
+                    html.Pre(id="checklist-items2"),
+
+                    daq.BooleanSwitch(id='review-night', on=False, label=' Do you need to review this night?'),
+
                     dcc.Graph(id='graph'),
 
                     html.Div([
                         dcc.RangeSlider(
                             min = 0, 
-                            max = fig_variables[14],
+                            max = 25920,
                             step = 1,
                             marks = {
                                 0: 'noon',
-                                axis_range: '2pm',
-                                2*axis_range: '4pm',
-                                3*axis_range: '6pm',
-                                4*axis_range: '8pm',
-                                5*axis_range: '10pm',
-                                6*axis_range: 'midnight',
-                                7*axis_range: '2am',
-                                8*axis_range: '4am',
-                                9*axis_range: '6am',
-                                10*axis_range: '8am',
-                                11*axis_range: '10am',
-                                12*axis_range: 'noon'
+                                tmp_axis: '1pm',
+                                2*tmp_axis: '2pm',
+                                3*tmp_axis: '3pm',
+                                4*tmp_axis: '4pm',
+                                5*tmp_axis: '5pm',
+                                6*tmp_axis: '6pm',
+                                7*tmp_axis: '7pm',
+                                8*tmp_axis: '8pm',
+                                9*tmp_axis: '9pm',
+                                10*tmp_axis: '10pm',
+                                11*tmp_axis: '11pm',
+                                12*tmp_axis: 'midnight',
+                                13*tmp_axis: '1am',
+                                14*tmp_axis: '2am',
+                                15*tmp_axis: '3am',
+                                16*tmp_axis: '4am',
+                                17*tmp_axis: '5am',
+                                18*tmp_axis: '6am',
+                                19*tmp_axis: '7am',
+                                20*tmp_axis: '8am',
+                                21*tmp_axis: '9am',
+                                22*tmp_axis: '10am',
+                                23*tmp_axis: '11am',
+                                24*tmp_axis: 'noon',
+                                25*tmp_axis: '1pm',
+                                26*tmp_axis: '2pm',
+                                27*tmp_axis: '3pm',
+                                28*tmp_axis: '4pm',
+                                29*tmp_axis: '5pm',
+                                30*tmp_axis: '6pm',
+                                31*tmp_axis: '7pm',
+                                32*tmp_axis: '8pm',
+                                33*tmp_axis: '9pm',
+                                34*tmp_axis: '10pm',
+                                35*tmp_axis: '11pm',
+                                36*tmp_axis: 'midnight'
                             },
                             id = 'my-range-slider',
                             ),
                         html.Pre(id="annotations-slider")],
+                        #html.Pre(id="annotations-nap"),
                         style = {"margin-left": "55px", "margin-right": "55px"}),
 
                     #html.Button('Refresh graph', id='btn_clear', style={"margin-left": "15px"}),
@@ -909,6 +1115,21 @@ def parse_contents(filename, name):
         print(e)
         return dash.no_update
 
+@app.callback(
+    Output('multiple_sleep', 'on'),
+    Input('day_slider', 'value')
+)
+
+def update_nap_switch(day):
+    identifier = fig_variables[0]
+    filename = 'multiple_sleeplog_' + identifier + '.csv'
+    naps = open_multiple_sleeplog(identifier)
+
+    if naps[day-1] == 0:
+        return False
+    else:
+        return True
+
 
 @app.callback(
     Output('exclude-night', 'on'),
@@ -916,9 +1137,29 @@ def parse_contents(filename, name):
 )
 
 def update_exclude_switch(day):
-    vec_night_to_exclude = fig_variables[15]
+    identifier = fig_variables[0]
+    filename = 'missing_sleep_' + identifier + '.csv'
 
-    if vec_night_to_exclude[day-1] == 0:
+    missing = open_datacleaning(identifier)
+
+    if missing[day-1] == 0:
+        return False
+    else:
+        return True
+
+
+@app.callback(
+    Output('review-night', 'on'),
+    Input('day_slider', 'value')
+)
+
+def update_review_night(day):
+    identifier = fig_variables[0]
+    filename = 'review_night_' + identifier + '.csv'
+
+    nights = open_review_night(identifier)
+
+    if nights[day-1] == 0:
         return False
     else:
         return True
@@ -930,6 +1171,8 @@ def update_exclude_switch(day):
     Input('day_slider', 'value'),
     #Input('btn_clear', 'n_clicks'),
     Input('exclude-night', 'on'),
+    Input('review-night', 'on'),
+    Input('multiple_sleep', 'on'),
     Input('my-range-slider', 'value'),
     #[State('my-range-slider', 'value')],
     suppress_callback_exceptions=True,
@@ -937,7 +1180,7 @@ def update_exclude_switch(day):
 )
 
 #def update_graph(day, nclicks, exclude_button, position):
-def update_graph(day, exclude_button, position):
+def update_graph(day, exclude_button, review_night, nap, position):
     identifier = fig_variables[0]
     axis_range = fig_variables[1]
     daycount = fig_variables[2]
@@ -948,13 +1191,19 @@ def update_graph(day, exclude_button, position):
     #vec_sleeponset = fig_variables[7]
     #vec_wake = fig_variables[8]
     npointsperday = fig_variables[14]
-    night_to_exclude = fig_variables[15]
+    #night_to_exclude = fig_variables[15]
+    #nap_time = fig_variables[18]
     vec_nonwear = fig_variables[16]
     all_dates = fig_variables[17]
+    date_time = fig_variables[19]
+    #night_to_review = fig_variables[20]
+
+    night_to_review = open_review_night(identifier)
+    nap_times = open_multiple_sleeplog(identifier)
+    night_to_exclude = open_datacleaning(identifier)
 
     sleeponset, wakeup = open_sleeplog_file(identifier)
-
-    vec_sleeponset, vec_wake = time2point(sleeponset[day-1], wakeup[day-1])
+    vec_sleeponset, vec_wake = time2point(sleeponset[day-1], wakeup[day-1], day)
 
     value_nonwear = []
     end_value_new = []
@@ -964,7 +1213,6 @@ def update_graph(day, exclude_button, position):
     month_1 = calendar.month_abbr[int(all_dates[day-1][5:7])]
     day_of_week_1 = datetime.fromisoformat(all_dates[day-1])
     day_of_week_1 = day_of_week_1.strftime("%A")
-    
 
     if (day < daycount-1):
         month_2 = calendar.month_abbr[int(all_dates[day][5:7])]
@@ -976,23 +1224,88 @@ def update_graph(day, exclude_button, position):
     else:
         title_day = 'Day ' + str(day) + ': ' + day_of_week_1 + ' - ' + all_dates[day-1][8:] + ' ' + month_1 + ' ' + all_dates[day-1][0:4]
     
-    #global fig
+    # Getting the timestamp (one minute resolution) and transforming it to dataframe
+    # Need to do this to plot the time on the graph hover
+    if (day < daycount-1):
+        timestamp_day1 = [all_dates[day-1] for x in range(int(npointsperday/2))]
+        timestamp_day2 = [all_dates[day] for x in range(npointsperday)]
+        timestamp = timestamp_day1 + timestamp_day2
+
+        timestamp = [(timestamp[x]+point2time_timestamp(x)) for x in range(0,npointsperday+int(npointsperday/2))]
+
+        df = pd.DataFrame(index = timestamp)
+        df['vec_ang'] = np.concatenate((vec_ang[day-1,:], vec_ang[day,0:int(npointsperday/2)]))
+        df['vec_acc'] = np.concatenate((vec_acc[day-1,:], vec_acc[day,0:int(npointsperday/2)]))
+        df['non_wear'] = np.concatenate((vec_nonwear[day-1,:], vec_nonwear[day,0:int(npointsperday/2)]))
+    else: # in case this is the last day
+        # Adding one more day to the day vector
+        curr_date = all_dates[day-1]
+        list_temp = list(curr_date)
+        temp = int(curr_date[8:]) + 1
+
+        if (len(str(temp)) == 1):
+            temp = "0" + str(temp)
+        else:
+            temp = str(temp)
+
+        list_temp[8:] = temp
+        curr_date = ''.join(list_temp)
+
+        timestamp_day1 = [all_dates[day-1] for x in range(int(npointsperday/2))]
+        timestamp_day2 = [curr_date for x in range(npointsperday)]
+        timestamp = timestamp_day1 + timestamp_day2
+
+        timestamp = [(timestamp[x]+point2time_timestamp(x)) for x in range(0,npointsperday+int(npointsperday/2))]
+
+        vec_end = [0 for x in range(int(npointsperday/2))]
+        vec_end_acc = [-210 for x in range(int(npointsperday/2))]
+
+        df = pd.DataFrame(index = timestamp)
+        df['vec_ang'] = np.concatenate((vec_ang[day-1,:], vec_end))
+        df['vec_acc'] = np.concatenate((vec_acc[day-1,:], vec_end_acc))
+        df['non_wear'] = np.concatenate((vec_nonwear[day-1,:], vec_end))
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=vec_ang[day-1,:], mode='lines', name='Angle of sensor\'s z-axis', line_width=1, line_color="blue"))
-    fig.add_trace(go.Scatter(y=vec_acc[day-1,:], mode='lines', name = 'Arm movement', line_width=1, line_color="black"))
+    fig.add_trace(go.Scatter(x=df.index, y=df.vec_ang, mode='lines', name='Angle of sensor\'s z-axis', line_color="blue"))
+    fig.add_trace(go.Scatter(x=df.index, y=df.vec_acc, mode='lines', name='Arm movement', line_color="black"))
+    
+
     fig.update_layout(legend=dict(
         orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
     fig.update_layout(title=title_day)
-    
-    if (int(vec_sleeponset) == 10800 and int(vec_wake) == 10800):
-    #if (int(vec_sleeponset) > 0 and int(vec_wake) > 0):
-        fig.add_vrect(x0=int(vec_sleeponset), x1=int(vec_wake), line_width=0, fillcolor="red", opacity=0.2)
+
+    sleep_split = sleeponset[day-1].split(":")
+    if int(sleep_split[1]) < 10:
+        sleep_split[1] = '0' + sleep_split[1]
+    new_sleep = sleep_split[0] + ':' + sleep_split[1]
+
+    if (vec_sleeponset < int(npointsperday/2)):
+        new_sleep = all_dates[day-1] + new_sleep
+    elif (vec_sleeponset > int(npointsperday/2) and (day == daycount-1)):
+        new_sleep = all_dates[day-1] + new_sleep
     else:
-        fig.add_vrect(x0=int(vec_sleeponset), x1=int(vec_wake), line_width=0, fillcolor="red", opacity=0.2, annotation_text="sleep window", annotation_position="top left")
+        new_sleep = all_dates[day] + new_sleep
+
+    wake_split = wakeup[day-1].split(":")
+    if int(wake_split[1]) < 10:
+        wake_split[1] = '0' + wake_split[1]
+    new_wake = wake_split[0] + ':' + wake_split[1]
+
+    if (vec_wake < int(npointsperday/2)):
+        new_wake = all_dates[day-1] + new_wake
+    elif (vec_wake > int(npointsperday/2) and (day == daycount-1)):
+        new_wake = all_dates[day-1] + new_wake
+    else:
+        new_wake = all_dates[day] + new_wake
+
+    if (new_sleep == '3:00' and new_wake == '3:00'):
+        fig.add_vrect(x0=new_sleep, x1=new_wake, line_width=0, fillcolor="red", opacity=0.2)
+    else:
+        fig.add_vrect(x0=new_sleep, x1=new_wake, line_width=0, fillcolor="red", opacity=0.2, annotation_text="sleep window", annotation_position="top left")
 
     # Nonwear
-    vec_for_the_day = vec_nonwear[day-1]
+    vec_for_the_day = np.concatenate((vec_nonwear[day-1,:], vec_nonwear[day-1,0:8620]))
+
     if (int(vec_for_the_day[0]) == 0):
         begin_value = np.where(np.diff(vec_nonwear[day-1]) == 1)
         begin_value = begin_value[0] + 180
@@ -1009,70 +1322,84 @@ def update_graph(day, exclude_button, position):
         end_value = end_value[0] + 180
         end_value = np.insert(end_value, 0, 179)
 
-    if len(end_value) == 1:
-        fig.add_vrect(x0=int(begin_value), x1=int(end_value), line_width=0, fillcolor="green", opacity=0.5, annotation_text="nonwear", annotation_yshift=110, annotation_position="left")
-    elif len(end_value) > 1:
-        fig.add_vrect(x0=int(begin_value[1]), x1=int(end_value[1]), line_width=0, fillcolor="green", opacity=0.5, annotation_text="nonwear", annotation_yshift=110, annotation_position="left")
-        for ii in range(2,len(end_value)-1):
-            fig.add_vrect(x0=int(begin_value[ii]), x1=int(end_value[ii]), line_width=0, fillcolor="green", opacity=0.5)
+    for ii in range(0, len(begin_value)):
+        if end_value[ii] >= 17280:
+            end_value[ii] = 17279
+        new_begin_value = point2time_timestamp(begin_value[ii])
+        new_end_value = point2time_timestamp(end_value[ii])
+
+        if ii == 0:
+            fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day-1]+new_end_value, line_width=0, fillcolor="green", opacity=0.5, annotation_text="nonwear", annotation_yshift=110, annotation_position="left")
+        else:
+            fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day-1]+new_end_value, line_width=0, fillcolor="green", opacity=0.5, annotation_text="", annotation_yshift=110, annotation_position="left")
 
     fig.update_xaxes(
-        ticktext=["noon", "2pm", "4pm", "6pm", "8pm", "10pm", "midnight", "2am", "4am", "6am", "8am", "10am", "noon"],
-        tickvals=[1, axis_range, 2*axis_range, 3*axis_range, 4*axis_range, 5*axis_range, 6*axis_range,
-                  7*axis_range, 8*axis_range, 9*axis_range, 10*axis_range, 11*axis_range, 12*axis_range] )
+        ticktext=["noon", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm", "7pm", "8pm", "9pm", "10pm", "11pm", "midnight", 
+                  "1am", "2am", "3am", "4am", "5am", "6am", "7am", "8am", "9am", "10am", "11am", "noon",
+                  "1pm", "2pm", "3pm", "4pm", "5pm", "6pm", "7pm", "8pm", "9pm", "10pm", "11pm", "midnight"],
+        tickvals=['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '0:00',
+                  '1:00', '2:00', '3:00', '4:00', '5:00', '6:00', '7:00', '8:00', '9:00', '10:00', '11:00', '12:00',
+                  '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '0:00'])
 
-    #fig.update_layout(showlegend=True, dragmode="drawrect")
     fig.update_layout(showlegend=True)
     fig.update_yaxes(visible=False, showticklabels=False)
-    #fig.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
-
-    print("Button to exclude night: ", exclude_button)
 
     if (exclude_button == False):
         night_to_exclude[day-1] = 0
-        save_excluded_night(fig_variables[0], night_to_exclude)
-        print(night_to_exclude)
-    else:
+        save_excluded_night(identifier, night_to_exclude)
+        save_datacleaning(identifier, night_to_exclude)
+        print("Nights to exclude: ", night_to_exclude)
+    elif (exclude_button == True):
         night_to_exclude[day-1] = 1
-        save_excluded_night(fig_variables[0], night_to_exclude)
-        print(night_to_exclude)
-    
-    #save_sleeplog_file(identifier, day, vec_sleeponset, vec_wake)
+        save_excluded_night(identifier, night_to_exclude)
+        save_datacleaning(identifier, night_to_exclude)
+        print("Nights to exclude: ", night_to_exclude)
+
+
+    if (review_night == False):
+        night_to_review[day-1] = 0
+        save_review_night(identifier, night_to_review)
+        print("Nights to review: ", night_to_review)
+    elif (review_night == True):
+        night_to_review[day-1] = 1
+        save_review_night(identifier, night_to_review)
+        print("Nights to review: ", night_to_review)
+
+    if (nap == False):
+        nap_times[day-1] = 0
+        save_multiple_sleeplog(identifier, nap_times)
+        print("Nap times: ", nap_times)
+    elif (nap == True):
+        nap_times[day-1] = 1
+        save_multiple_sleeplog(identifier, nap_times)
+        print("Nap times: ", nap_times)
 
     return fig,[int(vec_sleeponset),int(vec_wake)]   
 
 '''
-def update_sleep_window(day, position):
-
-    identifier = fig_variables[0]
-
-    sleep, wake = open_sleeplog_file(identifier)
-
-    if (int(sleep[day]) > 0 and int(wake[day]) > 0):
-        fig.add_vrect(x0=sleep[day], x1=wake[day], line_width=0, fillcolor="red", opacity=0.2, annotation_text="sleep window", annotation_position="top left")
-    else:
-        fig.add_vrect(x0=sleep[day], x1=wake[day], line_width=0, fillcolor="red", opacity=0.2)
-
-    #fig.update_layout()
-
-    return fig
-'''
-
 @app.callback(
     Output('checklist-items', 'children'),
-    Input('multiple_sleep', 'value'),
-    Input('input_name', 'value'),
+    Input('multiple_sleep', 'on'),
+    Input('day_slider', 'value'),
     suppress_callback_exceptions=True,
     prevent_initial_call=True
 )
 
-def save_multiple_sleep(multiple_value, name):
-    if (multiple_value == None or multiple_value == []):
-        save_multiple_sleep_log(name, fig_variables[0], "No")
-        return ''
-    else:
-        save_multiple_sleep_log(name, fig_variables[0], "Yes")
-        return ''
+def save_multiple_sleep(multiple_value, day):
+    identifier = fig_variables[0]
+    nap_time = fig_variables[18]
+
+    if (multiple_value == False):
+        nap_time[day-1] = 0
+        save_multiple_sleeplog(identifier, nap_time)
+        print("Nap times: ", nap_time)
+    elif (multiple_value == True):
+        nap_time[day-1] = 1
+        save_multiple_sleeplog(identifier, nap_time)
+        print("Nap times: ", nap_time)
+
+    return ''
+'''
 
 @app.callback(
     Output('check-done', 'children'),
@@ -1095,12 +1422,7 @@ def save_log_done(value):
 def save_info(drag_value, day):
 
     identifier = fig_variables[0]
-    #tt = store_sleep_diary(day, value[0], value[1])
     save_sleeplog_file(identifier, day, drag_value[0], drag_value[1])
-
-    print('Saving chages into sleep log')
-
-
 
 
 if __name__ == '__main__':
