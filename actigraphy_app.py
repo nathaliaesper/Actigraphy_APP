@@ -23,8 +23,9 @@ import math
 from pathlib import Path
 from os import listdir
 from os.path import exists, isfile, join
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from plotly.subplots import make_subplots
+from pandas.tseries.offsets import *
 import argparse
 
 #print(daq.__version__)
@@ -926,6 +927,51 @@ def time2point(sleep, wake, day):
 
     return sleep2return, wake2return
 
+def timestamp_to_decimaltime(time, is_sleep):
+
+    time_split = time.split(':')
+    time_decimal = ((int(time_split[0]) * 60) + int(time_split[1]))/60
+
+
+    if (is_sleep == 1):
+        if time_decimal > 12:
+            time_decimal = time_decimal - 24
+
+    return time_decimal
+
+
+def decimaltime_to_timestamp(time):
+
+    time_int = int(time)
+    time_decimal = int((time*60) % 60)
+
+    time_string = str(time_int) + ':' + str(time_decimal)
+
+    return time_string
+
+
+def calculate_sleep_duration(sleeponset, wakeup):
+
+    sleep_decimal = timestamp_to_decimaltime(sleeponset, 1)
+    wake_decimal = timestamp_to_decimaltime(wakeup, 0)
+    
+    sleep_duration_decimal = wake_decimal - sleep_decimal
+    
+    sleep_duration = decimaltime_to_timestamp(sleep_duration_decimal)
+
+    return sleep_duration
+
+
+def hour_to_time_string(hour):
+    if hour % 24 == 0:
+        return 'noon'
+    if (hour + 12) % 24 == 0:
+        return 'midnight'
+
+    clock_hour = hour % 12
+    am_pm = 'am' if (hour // 12) % 2 == 1 else 'pm'
+
+    return f'{clock_hour}{am_pm}'
 
 colors = {
     'background': '#FFFFFF',
@@ -936,7 +982,7 @@ colors = {
 
 app.layout = html.Div(style={'backgroundColor': colors['background']}, children=[
     
-    html.Img(src='/assets/CMI_Logo_title.png', style={'height':'70%', 'width':'70%'}),
+    html.Img(src='/assets/CMI_Logo_title.png', style={'height':'60%', 'width':'60%'}),
 
     html.Div([
         dcc.ConfirmDialog(
@@ -1055,55 +1101,23 @@ def parse_contents(filename, name):
                     dcc.Graph(id='graph'),
 
                     html.Div([
+                        html.B(id="sleep-onset"),
+                        html.B(id="sleep-offset"),
+                        html.B(id="sleep-duration")],
+                        style = {"margin-left": "80px", "margin-right": "55px"}
+                    ),
+                    
+                    html.Div([
                         dcc.RangeSlider(
                             min = 0, 
                             max = 25920,
                             step = 1,
-                            marks = {
-                                0: 'noon',
-                                tmp_axis: '1pm',
-                                2*tmp_axis: '2pm',
-                                3*tmp_axis: '3pm',
-                                4*tmp_axis: '4pm',
-                                5*tmp_axis: '5pm',
-                                6*tmp_axis: '6pm',
-                                7*tmp_axis: '7pm',
-                                8*tmp_axis: '8pm',
-                                9*tmp_axis: '9pm',
-                                10*tmp_axis: '10pm',
-                                11*tmp_axis: '11pm',
-                                12*tmp_axis: 'midnight',
-                                13*tmp_axis: '1am',
-                                14*tmp_axis: '2am',
-                                15*tmp_axis: '3am',
-                                16*tmp_axis: '4am',
-                                17*tmp_axis: '5am',
-                                18*tmp_axis: '6am',
-                                19*tmp_axis: '7am',
-                                20*tmp_axis: '8am',
-                                21*tmp_axis: '9am',
-                                22*tmp_axis: '10am',
-                                23*tmp_axis: '11am',
-                                24*tmp_axis: 'noon',
-                                25*tmp_axis: '1pm',
-                                26*tmp_axis: '2pm',
-                                27*tmp_axis: '3pm',
-                                28*tmp_axis: '4pm',
-                                29*tmp_axis: '5pm',
-                                30*tmp_axis: '6pm',
-                                31*tmp_axis: '7pm',
-                                32*tmp_axis: '8pm',
-                                33*tmp_axis: '9pm',
-                                34*tmp_axis: '10pm',
-                                35*tmp_axis: '11pm',
-                                36*tmp_axis: 'midnight'
-                            },
+                            marks = {i * tmp_axis: hour_to_time_string(i) for i in range(37)},
                             id = 'my-range-slider',
                             ),
                         html.Pre(id="annotations-slider")],
                         #html.Pre(id="annotations-nap"),
                         style = {"margin-left": "55px", "margin-right": "55px"}),
-
                     #html.Button('Refresh graph', id='btn_clear', style={"margin-left": "15px"}),
                             
                     html.Pre(id="annotations-save"),
@@ -1294,10 +1308,12 @@ def update_graph(day, exclude_button, review_night, nap, position):
         new_wake = all_dates[day-1] + new_wake
     elif (vec_wake > int(npointsperday/2) and (day == daycount-1)):
         new_wake = all_dates[day-1] + new_wake
+    elif (vec_wake > int(npointsperday)):
+        new_wake = all_dates[day] + new_wake
     else:
         new_wake = all_dates[day] + new_wake
 
-    if (new_sleep == '3:00' and new_wake == '3:00'):
+    if (new_sleep[-4:] == '3:00' and new_wake[-4:] == '3:00'): # Getting the last four characters from the string containing day and time
         fig.add_vrect(x0=new_sleep, x1=new_wake, line_width=0, fillcolor="red", opacity=0.2)
     else:
         fig.add_vrect(x0=new_sleep, x1=new_wake, line_width=0, fillcolor="red", opacity=0.2, annotation_text="sleep window", annotation_position="top left")
@@ -1321,17 +1337,41 @@ def update_graph(day, exclude_button, review_night, nap, position):
         end_value = end_value[0] + 180
         end_value = np.insert(end_value, 0, 179)
 
-    for ii in range(0, len(begin_value)):
-        if end_value[ii] >= 17280:
-            end_value[ii] = 17279
-        new_begin_value = point2time_timestamp(begin_value[ii])
-        new_end_value = point2time_timestamp(end_value[ii])
+    new_end_value = []
+    new_begin_value = []
+    rect_data_init = []
+    rect_data_final = []
+    idx = 0
 
-        if ii == 0:
-            fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day-1]+new_end_value, line_width=0, fillcolor="green", opacity=0.5, annotation_text="nonwear", annotation_yshift=110, annotation_position="left")
+    if len(begin_value > 0):
+        rect_data_init.append(begin_value[0])
+
+        for ii in range(0, len(begin_value)-1):
+            if begin_value[ii+1] - end_value[ii] > 1:
+                idx = idx + 1
+                rect_data_init.append(begin_value[ii+1])
+                rect_data_final.append(end_value[ii])
+
+        rect_data_final.append(end_value[-1])
+
+    for ii in range(0, len(rect_data_init)):
+        if rect_data_final[ii] >= 17280:
+            rect_data_final[ii] = 17279
+        new_begin_value = point2time_timestamp(rect_data_init[ii])
+        new_end_value = point2time_timestamp(rect_data_final[ii])
+    
+        # need to control for different days (non-wear marker after midnight)
+        if rect_data_init[ii] >= 8640:
+            fig.add_vrect(x0=all_dates[day]+new_begin_value, x1=all_dates[day]+new_end_value, line_width=0, fillcolor="green", opacity=0.5)
+            fig.add_annotation(text="nonwear", y = 75, x = all_dates[day]+new_begin_value, xanchor="left", showarrow=False)
         else:
-            fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day-1]+new_end_value, line_width=0, fillcolor="green", opacity=0.5, annotation_text="", annotation_yshift=110, annotation_position="left")
-
+            if rect_data_final[ii] >= 8640:
+                fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day]+new_end_value, line_width=0, fillcolor="green", opacity=0.5)
+                fig.add_annotation(text="nonwear", y = 75, x = all_dates[day-1]+new_begin_value, xanchor="left", showarrow=False)
+            else:
+                fig.add_vrect(x0=all_dates[day-1]+new_begin_value, x1=all_dates[day-1]+new_end_value, line_width=0, fillcolor="green", opacity=0.5)
+                fig.add_annotation(text="nonwear", y = 75, x = all_dates[day-1]+new_begin_value, xanchor="left", showarrow=False)
+    
     fig.update_xaxes(
         ticktext=["noon", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm", "7pm", "8pm", "9pm", "10pm", "11pm", "midnight", 
                   "1am", "2am", "3am", "4am", "5am", "6am", "7am", "8am", "9am", "10am", "11am", "noon",
@@ -1374,6 +1414,7 @@ def update_graph(day, exclude_button, review_night, nap, position):
         print("Nap times: ", nap_times)
 
     return fig,[int(vec_sleeponset),int(vec_wake)]   
+    #return fig, [int(vec_sleeponset).strftime('%H%M'), int(vec_wake).strtime('%H%M')]
 
 '''
 @app.callback(
@@ -1414,6 +1455,9 @@ def save_log_done(value):
 
 @app.callback(
     Output("annotations-save", "children"),
+    Output("sleep-onset", "children"),
+    Output("sleep-offset", "children"),
+    Output("sleep-duration", "children"),
     Input('my-range-slider', 'drag_value'),
     State("day_slider", "value")
 )
@@ -1421,11 +1465,16 @@ def save_log_done(value):
 def save_info(drag_value, day):
 
     identifier = fig_variables[0]
+    daycount = fig_variables[2]
     save_sleeplog_file(identifier, day, drag_value[0], drag_value[1])
+    sleep_time, wake_time = point2time(drag_value[0], drag_value[1])
+
+    sleep_duration = calculate_sleep_duration(sleep_time, wake_time)
+
+    return '', 'Sleep onset: ' + sleep_time + '\n', 'Sleep offset: ' + wake_time + '\n', 'Sleep duration: ' + sleep_duration
 
 
 if __name__ == '__main__':
     #app.run_server(debug=True,dev_tools_ui=False)
     #app.run_server(debug=True, port=8050)
     app.run_server(debug=False)
-
